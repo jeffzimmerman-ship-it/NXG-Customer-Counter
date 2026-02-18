@@ -164,16 +164,22 @@ def upload_image_to_slack(image_bytes: bytes) -> None:
         "Content-Type": "application/json; charset=utf-8",
     }
 
-    # Step 1: Get upload URL
-    step1_payload = json.dumps({
+    # Step 1: Get upload URL (must be sent as form-encoded data, not JSON)
+    import urllib.parse
+    step1_payload = urllib.parse.urlencode({
         "filename": filename,
         "length": len(image_bytes),
     }).encode()
 
+    form_headers = {
+        "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+
     req = urllib.request.Request(
         "https://slack.com/api/files.getUploadURLExternal",
         data=step1_payload,
-        headers=headers,
+        headers=form_headers,
         method="POST",
     )
     with urllib.request.urlopen(req) as r:
