@@ -33,7 +33,6 @@ ACCENT_COLOR  = "#751165"  # Left bar + label + date text
 NUMBER_COLOR  = "#3C247F"  # Large customer count
 BG_COLOR      = "#FEF9F2"  # Background
 GRID_COLOR    = "#F5EEE3"  # Subtle grid lines
-DIVIDER_COLOR = "#E8D9C5"  # Bottom divider line
 
 
 # ── ChartMogul ────────────────────────────────────────────────────────────────
@@ -71,12 +70,31 @@ def hex_to_rgb(hex_color: str) -> tuple:
     h = hex_color.lstrip("#")
     return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
 
+def download_poppins() -> str:
+    """Downloads Poppins-Regular.ttf from Google Fonts to a temp file if not already cached."""
+    import tempfile, os
+    cache_path = os.path.join(tempfile.gettempdir(), "Poppins-Regular.ttf")
+    if not os.path.exists(cache_path):
+        # Direct download from Google Fonts static CDN
+        url = "https://fonts.gstatic.com/s/poppins/v21/pxiEyp8kv8JHgFVrJJfecg.woff2"
+        # We need a TTF, not woff2 — use the GitHub raw release instead
+        url = "https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Regular.ttf"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req) as r:
+            data = r.read()
+        with open(cache_path, "wb") as f:
+            f.write(data)
+    return cache_path
+
+
 def generate_image(customer_count: int) -> bytes:
-    """Renders a dark-themed dashboard card image and returns PNG bytes."""
+    """Renders a styled dashboard card image and returns PNG bytes."""
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError:
         raise RuntimeError("Pillow is not installed. Run: pip install Pillow")
+
+    import os
 
     W, H = IMAGE_WIDTH, IMAGE_HEIGHT
     today_str = date.today().strftime("%B %d, %Y")
@@ -93,56 +111,48 @@ def generate_image(customer_count: int) -> bytes:
     # Accent bar on left edge
     draw.rectangle([0, 0, 5, H], fill=ACCENT_COLOR)
 
-    # Font paths — falls back gracefully across OS
-    font_paths = {
-        "bold": [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-            "/System/Library/Fonts/Helvetica.ttc",
-            "C:/Windows/Fonts/arialbd.ttf",
-        ],
-        "regular": [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-            "/System/Library/Fonts/Helvetica.ttc",
-            "C:/Windows/Fonts/arial.ttf",
-        ],
-    }
+    # Load Song Myung (number) — expected in the same directory as this script
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    song_myung_path = os.path.join(script_dir, "SongMyung-Regular.ttf")
 
-    def load_font(style, size):
-        for path in font_paths[style]:
-            try:
-                return ImageFont.truetype(path, size)
-            except (IOError, OSError):
-                continue
+    # Load Poppins (label + date) — downloaded at runtime from Google Fonts
+    poppins_path = download_poppins()
+
+    def load_font(path, size, fallback_paths=None):
+        try:
+            return ImageFont.truetype(path, size)
+        except (IOError, OSError):
+            for fp in (fallback_paths or []):
+                try:
+                    return ImageFont.truetype(fp, size)
+                except (IOError, OSError):
+                    continue
         return ImageFont.load_default()
 
-    font_big   = load_font("bold",    180)
-    font_label = load_font("regular",  32)
-    font_date  = load_font("regular",  22)
+    system_fallbacks = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    ]
+
+    font_big   = load_font(song_myung_path, 180, system_fallbacks)
+    font_label = load_font(poppins_path,     32,  system_fallbacks)
+    font_date  = load_font(poppins_path,     22,  system_fallbacks)
 
     # "PAYING CUSTOMERS" label
     label = "PAYING CUSTOMERS"
     lw = draw.textlength(label, font=font_label)
     draw.text(((W - lw) / 2, 55), label, font=font_label, fill=ACCENT_COLOR)
 
-    # Large number with glow layers
+    # Large number — clean, no glow effect
     num_str = f"{customer_count:,}"
     nw = draw.textlength(num_str, font=font_big)
     nx = (W - nw) / 2
     ny = 110
-
-    for offset, color in [(6, "#0D1A3A"), (4, "#152444"), (2, "#1E3366")]:
-        draw.text((nx + offset, ny + offset), num_str, font=font_big, fill=color)
-        draw.text((nx - offset, ny - offset), num_str, font=font_big, fill=color)
     draw.text((nx, ny), num_str, font=font_big, fill=NUMBER_COLOR)
 
     # Date
     dw = draw.textlength(today_str, font=font_date)
     draw.text(((W - dw) / 2, 320), today_str, font=font_date, fill=ACCENT_COLOR)
-
-    # Bottom divider
-    draw.rectangle([60, 360, W - 60, 361], fill=DIVIDER_COLOR)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
