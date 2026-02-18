@@ -1,0 +1,31 @@
+name: Daily Paying Customers Report
+
+on:
+  schedule:
+    # Runs every day at 9:00 AM UTC — adjust to your timezone
+    # Use https://crontab.guru to customize the time
+    - cron: "0 9 * * *"
+  workflow_dispatch: # Allows manual triggering from the GitHub UI
+
+jobs:
+  post-to-slack:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install Pillow
+
+      - name: Run ChartMogul → Slack reporter
+        env:
+          CHARTMOGUL_API_KEY: ${{ secrets.CHARTMOGUL_API_KEY }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+        run: python chartmogul_to_slack.py
