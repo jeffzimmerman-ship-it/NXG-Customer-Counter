@@ -28,4 +28,4 @@ jobs:
           CHARTMOGUL_API_KEY: ${{ secrets.CHARTMOGUL_API_KEY }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
-        run: python chartmogul_to_slack.py
+        run: python customer_counter/chartmogul_to_slack.py
