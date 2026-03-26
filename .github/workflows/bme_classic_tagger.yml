@@ -6,6 +6,11 @@ on:
     # Use https://crontab.guru to customize the time
     - cron: "0 5 * * *"
   workflow_dispatch: # Allows manual triggering from the GitHub UI
+    inputs:
+      live_email:
+        description: "Optional: run for a single email address only (leave blank for full run)"
+        required: false
+        default: ""
 
 jobs:
   tag-bme-classic-customers:
@@ -24,4 +29,9 @@ jobs:
         env:
           CHARTMOGUL_API_KEY_RW: ${{ secrets.CHARTMOGUL_API_KEY_RW }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-        run: python bme_classic_tagger/bme_classic_tagger.py
+        run: |
+          if [ -n "${{ github.event.inputs.live_email }}" ]; then
+            python bme_classic_tagger/bme_classic_tagger.py --live-email "${{ github.event.inputs.live_email }}"
+          else
+            python bme_classic_tagger/bme_classic_tagger.py
+          fi
