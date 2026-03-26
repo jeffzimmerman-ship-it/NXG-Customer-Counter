@@ -15,9 +15,9 @@ bme_classic attribute on each customer record. POST is required (not PUT) becaus
 the attribute does not exist on customer records until explicitly set.
 
 Required environment variables:
-  CHARTMOGUL_API_KEY_RW      - ChartMogul API key with read-write access
-  SLACK_BOT_TOKEN            - Slack Bot token for channel notifications
-  SLACK_CHANNEL_ID_JEFFS_BOTS - Slack channel ID for #jeffs-bots
+  CHARTMOGUL_API_KEY_RW        - ChartMogul API key with read-write access
+  SLACK_BOT_TOKEN              - Slack Bot token for channel notifications
+  SLACK_CHANNEL_ID_JEFFS_BOTS  - Slack channel ID for #jeffs-bots
 
 Usage:
   # Normal run — tags all untagged customers in ChartMogul (live)
@@ -219,7 +219,6 @@ def print_summary_and_notify(
     tagged_true: int,
     tagged_false: int,
     errors: int,
-    details: list,
     start_time: datetime,
     notify_slack: bool,
 ) -> None:
@@ -241,13 +240,6 @@ def print_summary_and_notify(
     print()
     print("Sending Slack notification...")
 
-    # Build customer detail lines (cap at 50 to keep message readable)
-    detail_lines = []
-    for email, value in details[:50]:
-        detail_lines.append(f"  • {email} → {value}")
-    if len(details) > 50:
-        detail_lines.append(f"  • ... and {len(details) - 50} more (see full log)")
-
     # Build the GitHub Actions run URL if available
     run_url = ""
     github_server = os.environ.get("GITHUB_SERVER_URL", "")
@@ -264,9 +256,7 @@ def print_summary_and_notify(
         f"  • {total_untagged:,} customer(s) evaluated\n"
         f"  • {tagged_true:,} tagged TRUE (BME Classic)\n"
         f"  • {tagged_false:,} tagged FALSE (New)\n"
-        f"  • Completed in {elapsed}s\n\n"
-        f"*Customers updated:*\n"
-        f"{chr(10).join(detail_lines)}"
+        f"  • Completed in {elapsed}s"
         f"{run_url}"
     )
 
@@ -359,7 +349,6 @@ def run_live_email(email: str, bme_emails: set, start_time: datetime) -> None:
             tagged_true=1 if value else 0,
             tagged_false=0 if value else 1,
             errors=0,
-            details=[(email, "TRUE" if value else "FALSE")],
             start_time=start_time,
             notify_slack=True,
         )
@@ -387,7 +376,6 @@ def run_full(dry_run: bool, bme_emails: set, start_time: datetime) -> None:
     tagged_true  = 0
     tagged_false = 0
     errors       = 0
-    details      = []
 
     for customer in untagged:
         uuid  = customer["uuid"]
@@ -405,11 +393,9 @@ def run_full(dry_run: bool, bme_emails: set, start_time: datetime) -> None:
                 tagged_false += 1
                 label = "FALSE"
             print(f"  → {label}  {email}")
-            details.append((email, "TRUE" if value else "FALSE"))
         except RuntimeError as e:
             errors += 1
             print(f"  → ERROR  {email}: {e}", file=sys.stderr)
-            details.append((email, f"ERROR: {e}"))
 
     mode_label = "DRY RUN complete — no changes made" if dry_run else "Complete"
     print_summary_and_notify(
@@ -418,7 +404,6 @@ def run_full(dry_run: bool, bme_emails: set, start_time: datetime) -> None:
         tagged_true=tagged_true,
         tagged_false=tagged_false,
         errors=errors,
-        details=details,
         start_time=start_time,
         notify_slack=not dry_run,
     )
