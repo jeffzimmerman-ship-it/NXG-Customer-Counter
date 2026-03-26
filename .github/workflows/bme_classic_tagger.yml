@@ -15,6 +15,8 @@ on:
 jobs:
   tag-bme-classic-customers:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Check out repository
@@ -29,6 +31,7 @@ jobs:
         env:
           CHARTMOGUL_API_KEY_RW: ${{ secrets.CHARTMOGUL_API_KEY_RW }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID_JEFFS_BOTS: ${{ secrets.SLACK_CHANNEL_ID_JEFFS_BOTS }}
         run: |
           if [ -n "${{ github.event.inputs.live_email }}" ]; then
             python bme_classic_tagger/bme_classic_tagger.py --live-email "${{ github.event.inputs.live_email }}"
