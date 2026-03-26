@@ -15,8 +15,9 @@ bme_classic attribute on each customer record. POST is required (not PUT) becaus
 the attribute does not exist on customer records until explicitly set.
 
 Required environment variables:
-  CHARTMOGUL_API_KEY_RW  - ChartMogul API key with read-write access
-  SLACK_BOT_TOKEN        - Slack Bot token for DM notifications
+  CHARTMOGUL_API_KEY_RW      - ChartMogul API key with read-write access
+  SLACK_BOT_TOKEN            - Slack Bot token for channel notifications
+  SLACK_CHANNEL_ID_JEFFS_BOTS - Slack channel ID for #jeffs-bots
 
 Usage:
   # Normal run — tags all untagged customers in ChartMogul (live)
@@ -45,11 +46,9 @@ from datetime import datetime
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-CHARTMOGUL_API_KEY_RW = os.environ.get("CHARTMOGUL_API_KEY_RW", "")
-SLACK_BOT_TOKEN       = os.environ.get("SLACK_BOT_TOKEN", "")
-
-# Slack member ID to receive direct message notifications
-SLACK_DM_USER_ID      = "U03BRPGNUG6"
+CHARTMOGUL_API_KEY_RW       = os.environ.get("CHARTMOGUL_API_KEY_RW", "")
+SLACK_BOT_TOKEN             = os.environ.get("SLACK_BOT_TOKEN", "")
+SLACK_CHANNEL_ID_JEFFS_BOTS = os.environ.get("SLACK_CHANNEL_ID_JEFFS_BOTS", "")
 
 # Path to the BME Classic customer list, relative to this script
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -104,10 +103,13 @@ def _chartmogul_post(url: str, payload: dict) -> dict:
 
 # ── Slack helper ──────────────────────────────────────────────────────────────
 
-def _send_slack_dm(message: str) -> None:
-    """Sends a direct message to the configured Slack user."""
+def _send_slack_message(message: str) -> None:
+    """Posts a message to the #jeffs-bots Slack channel."""
     if not SLACK_BOT_TOKEN:
         print("  (Slack notification skipped — SLACK_BOT_TOKEN not set)")
+        return
+    if not SLACK_CHANNEL_ID_JEFFS_BOTS:
+        print("  (Slack notification skipped — SLACK_CHANNEL_ID_JEFFS_BOTS not set)")
         return
 
     headers = {
@@ -115,7 +117,7 @@ def _send_slack_dm(message: str) -> None:
         "Content-Type": "application/json; charset=utf-8",
     }
     payload = json.dumps({
-        "channel": SLACK_DM_USER_ID,
+        "channel": SLACK_CHANNEL_ID_JEFFS_BOTS,
         "text": message,
     }).encode()
 
@@ -129,9 +131,10 @@ def _send_slack_dm(message: str) -> None:
         with urllib.request.urlopen(req) as r:
             resp = json.loads(r.read().decode())
         if not resp.get("ok"):
-            print(f"  (Slack notification failed: {resp.get('error')})", file=sys.stderr)
+            raise RuntimeError(f"Slack API error: {resp.get('error')}")
     except Exception as e:
-        print(f"  (Slack notification error: {e})", file=sys.stderr)
+        print(f"  ✗ Slack notification failed: {e}", file=sys.stderr)
+        raise
 
 
 # ── Core logic ────────────────────────────────────────────────────────────────
@@ -220,7 +223,7 @@ def print_summary_and_notify(
     start_time: datetime,
     notify_slack: bool,
 ) -> None:
-    """Prints the run summary and optionally sends a Slack DM."""
+    """Prints the run summary and optionally posts to the #jeffs-bots Slack channel."""
     elapsed = (datetime.now() - start_time).seconds
 
     print()
@@ -232,7 +235,7 @@ def print_summary_and_notify(
         print(f"  → {errors:,}  errors (see above)")
     print("─" * 50)
 
-    if not notify_slack or not SLACK_BOT_TOKEN:
+    if not notify_slack:
         return
 
     print()
@@ -267,8 +270,11 @@ def print_summary_and_notify(
         f"{run_url}"
     )
 
-    _send_slack_dm(message)
-    print("  → Slack notification sent!")
+    try:
+        _send_slack_message(message)
+        print("  → Slack notification sent to #jeffs-bots!")
+    except Exception:
+        print("  ✗ Slack notification failed — check log for details.", file=sys.stderr)
 
 
 # ── Run modes ─────────────────────────────────────────────────────────────────
@@ -312,7 +318,7 @@ def run_live_email(email: str, bme_emails: set, start_time: datetime) -> None:
     """
     Live run for a single specific email address — looks up the customer
     in ChartMogul, checks against the CSV, and makes the real update.
-    Sends a Slack DM with the result.
+    Posts result to #jeffs-bots Slack channel.
     """
     print(f"🔴 LIVE EMAIL MODE — this will make a real change in ChartMogul.")
     print(f"  Processing email: {email}")
@@ -340,7 +346,6 @@ def run_live_email(email: str, bme_emails: set, start_time: datetime) -> None:
         print(f"  Result: This customer is already tagged — no action taken.")
         return
 
-    # Make the live update
     value = in_csv
     print(f"  Updating bme_classic to {'TRUE' if value else 'FALSE'}...")
     try:
@@ -366,7 +371,7 @@ def run_full(dry_run: bool, bme_emails: set, start_time: datetime) -> None:
     """
     Runs the full tagging process — fetches all untagged customers and tags them.
     In dry run mode, shows what would happen without making any changes.
-    Sends a Slack DM with the results (live runs only).
+    Posts results to #jeffs-bots Slack channel (live runs only).
     """
     print("Fetching untagged customers from ChartMogul...")
     untagged = fetch_untagged_customers()
