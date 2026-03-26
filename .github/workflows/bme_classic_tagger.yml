@@ -1,0 +1,27 @@
+name: BME Classic Customer Tagger
+
+on:
+  schedule:
+    # Runs every day at 5:00 AM UTC — 65 minutes before the Slack customer report (6:05 AM UTC)
+    # Use https://crontab.guru to customize the time
+    - cron: "0 5 * * *"
+  workflow_dispatch: # Allows manual triggering from the GitHub UI
+
+jobs:
+  tag-bme-classic-customers:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run BME Classic Tagger
+        env:
+          CHARTMOGUL_API_KEY_RW: ${{ secrets.CHARTMOGUL_API_KEY_RW }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: python bme_classic_tagger/bme_classic_tagger.py
