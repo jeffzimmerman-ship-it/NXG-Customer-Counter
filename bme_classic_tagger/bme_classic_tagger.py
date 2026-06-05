@@ -38,6 +38,7 @@ import sys
 import csv
 import json
 import time
+import http.client
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -60,6 +61,13 @@ API_BASE   = "https://api.chartmogul.com/v1"
 # Number of customers to fetch per page (200 is the maximum)
 PAGE_SIZE  = 200
 
+# Retry behavior for ChartMogul API requests.
+# Transient failures (dropped connections, timeouts, 429 rate limits, 5xx server
+# errors) are retried with exponential backoff: 2s, 4s, 8s, 16s, 32s.
+MAX_RETRIES     = 5
+RETRY_BASE_WAIT = 2   # seconds; doubles each attempt
+REQUEST_TIMEOUT = 60  # seconds; prevents a hung request from stalling the run
+
 
 # ── ChartMogul API helpers ────────────────────────────────────────────────────
 
@@ -68,17 +76,61 @@ def _get_credentials() -> str:
     return base64.b64encode(f"{CHARTMOGUL_API_KEY_RW}:".encode()).decode()
 
 
+def _chartmogul_request(url: str, payload: dict | None = None) -> dict:
+    """
+    Makes an authenticated request to the ChartMogul API and returns parsed JSON.
+    GET when payload is None, POST otherwise.
+
+    Transient failures are retried with exponential backoff (see MAX_RETRIES /
+    RETRY_BASE_WAIT). Retryable: dropped connections (RemoteDisconnected),
+    timeouts, DNS/network errors, HTTP 429 rate limits, and HTTP 5xx server
+    errors. Non-retryable errors (e.g. 401/404) raise immediately.
+    """
+    method = "GET" if payload is None else "POST"
+    last_error = None
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode() if payload is not None else None,
+            method=method,
+        )
+        req.add_header("Authorization", f"Basic {_get_credentials()}")
+        req.add_header("Accept", "application/json")
+        if payload is not None:
+            req.add_header("Content-Type", "application/json")
+
+        try:
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
+                return json.loads(response.read().decode())
+
+        except urllib.error.HTTPError as e:
+            body = e.read().decode(errors="replace")
+            if e.code == 429 or e.code >= 500:
+                # Rate limited or server error — retryable.
+                last_error = f"ChartMogul {method} error {e.code}: {body}"
+            else:
+                # Client error (bad auth, bad request, etc.) — retrying won't help.
+                raise RuntimeError(f"ChartMogul {method} error {e.code}: {body}") from e
+
+        except (urllib.error.URLError, http.client.HTTPException,
+                ConnectionError, TimeoutError) as e:
+            # Dropped connection, timeout, DNS failure, etc. — retryable.
+            last_error = f"ChartMogul {method} connection error: {type(e).__name__}: {e}"
+
+        if attempt < MAX_RETRIES:
+            wait = RETRY_BASE_WAIT * (2 ** (attempt - 1))
+            print(f"  ⚠ {last_error}", file=sys.stderr)
+            print(f"    Retrying in {wait}s (attempt {attempt + 1} of {MAX_RETRIES})...",
+                  file=sys.stderr)
+            time.sleep(wait)
+
+    raise RuntimeError(f"{last_error} (gave up after {MAX_RETRIES} attempts)")
+
+
 def _chartmogul_get(url: str) -> dict:
     """Makes an authenticated GET request to the ChartMogul API and returns parsed JSON."""
-    credentials = _get_credentials()
-    req = urllib.request.Request(url)
-    req.add_header("Authorization", f"Basic {credentials}")
-    req.add_header("Accept", "application/json")
-    try:
-        with urllib.request.urlopen(req) as response:
-            return json.loads(response.read().decode())
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"ChartMogul GET error {e.code}: {e.read().decode()}") from e
+    return _chartmogul_request(url)
 
 
 def _chartmogul_post(url: str, payload: dict) -> dict:
@@ -87,18 +139,9 @@ def _chartmogul_post(url: str, payload: dict) -> dict:
     Uses the Add Custom Attributes endpoint, which creates the attribute on the customer
     record. POST is required for customers who have never had the attribute set — the
     attribute does not exist on their record until explicitly created via this call.
+    (Safe to retry: re-sending the same attribute value is idempotent.)
     """
-    credentials = _get_credentials()
-    body = json.dumps(payload).encode()
-    req = urllib.request.Request(url, data=body, method="POST")
-    req.add_header("Authorization", f"Basic {credentials}")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Accept", "application/json")
-    try:
-        with urllib.request.urlopen(req) as response:
-            return json.loads(response.read().decode())
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"ChartMogul POST error {e.code}: {e.read().decode()}") from e
+    return _chartmogul_request(url, payload)
 
 
 # ── Slack helper ──────────────────────────────────────────────────────────────
